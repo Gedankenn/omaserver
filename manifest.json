@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "sabinho.omaserver",
+  "name": "Omaserver",
+  "version": "1.0.0",
+  "author": "sabinho",
+  "license": "MIT",
+  "description": "CPU, RAM, GPU, disk, watts and temperatures from omaserver on the Omarchy bar.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omaserver",
+    "description": "Chip with CPU%; click for RAM, GPU, disk and temps from the LAN box",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "host": "omaserver",
+      "user": "server",
+      "refreshSeconds": 5
+    },
+    "schema": [
+      {
+        "key": "host",
+        "type": "string",
+        "label": "SSH host",
+        "defaultValue": "omaserver",
+        "description": "Hostname or LAN IP of the server."
+      },
+      {
+        "key": "user",
+        "type": "string",
+        "label": "SSH user",
+        "defaultValue": "server",
+        "description": "Account used for BatchMode SSH."
+      },
+      {
+        "key": "refreshSeconds",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 3,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 5
+      }
+    ]
+  }
+}
