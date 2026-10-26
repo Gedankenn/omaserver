@@ -8,7 +8,7 @@ SSH is `server@omaserver` by default (BatchMode). The poll script pipes
 `host-stats.py` over SSH — nothing is installed on the server.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="Omaserver popup: charts, disk temperature grid and Docker grid" width="480">
+  <img src="assets/screenshot.png" alt="Omaserver popup: charts, disk temperature grid and Docker grid" width="900">
 </p>
 
 ## Install
