@@ -412,18 +412,150 @@ Panel {
     property var values: []
     property real scaleMax: 110
     property color accent: root.lime
+    property string unit: "°"
     property string caption: ""
+
+    readonly property real lastValue: spark.lastFinite(spark.values)
+    readonly property real drawMax: spark.ceilingFor(spark.values, spark.scaleMax, spark.unit)
+    readonly property int axisW: 34
+
+    function lastFinite(pts) {
+      var a = pts || []
+      for (var i = a.length - 1; i >= 0; i--) {
+        if (a[i] === null || a[i] === undefined || a[i] === "") continue
+        var n = Number(a[i])
+        if (isFinite(n)) return n
+      }
+      return 0
+    }
+
+    function maxOf(pts) {
+      var m = 0
+      var a = pts || []
+      for (var i = 0; i < a.length; i++) {
+        if (a[i] === null || a[i] === undefined || a[i] === "") continue
+        var n = Number(a[i])
+        if (isFinite(n) && n > m) m = n
+      }
+      return m
+    }
+
+    function ceilingFor(pts, scaleMax, unit) {
+      var cap = Math.max(Number(scaleMax) || 0, 1)
+      var peak = spark.maxOf(pts)
+      if (unit === "%") return Math.max(cap, peak)
+      if (peak <= cap) return cap
+      if (unit === "°") return Math.ceil(peak / 5) * 5
+      return Math.ceil(peak)
+    }
+
+    function capLabel(n, unit) {
+      var v = Number(n)
+      if (!isFinite(v)) v = 0
+      if (unit === "°") return Math.round(v) + "°"
+      if (unit === "W") return Math.round(v) + "W"
+      return Math.round(v) + unit
+    }
+
+    function peaksFor(pts, cap, w, h) {
+      var a = pts || []
+      var n = a.length
+      if (!n || w < 8 || h < 8) return []
+      var xs = []
+      var i
+      for (i = 0; i < n; i++) {
+        var raw = a[i]
+        if (raw === null || raw === undefined || raw === "") continue
+        var v = Number(raw)
+        if (!isFinite(v)) continue
+        xs.push({ i: i, v: v })
+      }
+      if (!xs.length) return []
+
+      var gMax = xs[0]
+      var gMin = xs[0]
+      for (i = 1; i < xs.length; i++) {
+        if (xs[i].v > gMax.v) gMax = xs[i]
+        if (xs[i].v < gMin.v) gMin = xs[i]
+      }
+      if (gMax.v <= 0) return []
+
+      var cands = []
+      var span = gMax.v - gMin.v
+      if (xs.length === 1 || span < cap * 0.10) {
+        var first = -1
+        var last = 0
+        for (i = 0; i < xs.length; i++) {
+          if (xs[i].v < gMax.v) continue
+          if (first < 0) first = i
+          last = i
+        }
+        var mid = first < 0 ? Math.floor(xs.length / 2) : Math.floor((first + last) / 2)
+        cands.push({ i: xs[mid].i, v: gMax.v })
+      } else {
+        var riseMin = Math.max(cap * 0.05, span * 0.12)
+        for (i = 0; i < xs.length; i++) {
+          var prev = i > 0 ? xs[i - 1].v : xs[i].v
+          var cur = xs[i].v
+          var next = i + 1 < xs.length ? xs[i + 1].v : xs[i].v
+          if (cur > prev && cur >= next && (cur - prev) >= riseMin)
+            cands.push(xs[i])
+        }
+        var hasMax = false
+        for (i = 0; i < cands.length; i++) {
+          if (cands[i].i === gMax.i) { hasMax = true; break }
+        }
+        if (!hasMax) cands.push(gMax)
+      }
+
+      cands.sort(function (a, b) { return b.v - a.v })
+
+      var out = []
+      var minDx = Math.max(40, w * 0.18)
+      for (i = 0; i < cands.length && out.length < 4; i++) {
+        var p = cands[i]
+        var x = n === 1 ? w * 0.5 : p.i * (w - 1) / (n - 1)
+        var clash = false
+        for (var k = 0; k < out.length; k++) {
+          if (Math.abs(x - out[k].x) < minDx) { clash = true; break }
+        }
+        if (clash) continue
+        var y = h - 1 - (h - 2) * Math.max(0, Math.min(1, p.v / cap))
+        out.push({ x: x, y: y, v: p.v })
+      }
+      return out
+    }
 
     Rectangle {
       anchors.fill: parent
       radius: 3
-      color: Qt.rgba(spark.accent.r, spark.accent.g, spark.accent.b, 0.14)
+      color: Qt.rgba(spark.accent.r, spark.accent.g, spark.accent.b, 0.12)
+    }
+
+    AxisRail {
+      id: leftRail
+      anchors.left: parent.left
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      anchors.margins: 2
+      width: spark.axisW
+      accent: spark.accent
+      ratio: Math.max(0, Math.min(1, spark.lastValue / Math.max(spark.drawMax, 1)))
+      topText: String(Math.round(Math.max(spark.drawMax, 0)))
+      botText: spark.capLabel(0, spark.unit)
+      railOnLeft: true
     }
 
     Canvas {
       id: plot
-      anchors.fill: parent
-      anchors.margins: 2
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      anchors.left: leftRail.right
+      anchors.right: parent.right
+      anchors.leftMargin: 3
+      anchors.rightMargin: 4
+      anchors.topMargin: 3
+      anchors.bottomMargin: 3
 
       onWidthChanged: requestPaint()
       onHeightChanged: requestPaint()
@@ -433,6 +565,7 @@ Panel {
         target: spark
         function onValuesChanged() { plot.requestPaint() }
         function onScaleMaxChanged() { plot.requestPaint() }
+        function onDrawMaxChanged() { plot.requestPaint() }
         function onAccentChanged() { plot.requestPaint() }
       }
 
@@ -441,13 +574,17 @@ Panel {
         var w = width
         var h = height
         ctx.clearRect(0, 0, w, h)
+        if (w < 2 || h < 2) return
+
+        var va = spark.accent
+        var stroke = "rgb(" + Math.round(va.r * 255) + ", " + Math.round(va.g * 255) + ", " + Math.round(va.b * 255) + ")"
+        var cap = Math.max(spark.drawMax, 1)
         var pts = spark.values || []
         var n = pts.length
-        if (!n || w < 2 || h < 2) return
-        var cap = Math.max(spark.scaleMax, 1)
-        var c = spark.accent
-        ctx.strokeStyle = "rgb(" + Math.round(c.r * 255) + ", " + Math.round(c.g * 255) + ", " + Math.round(c.b * 255) + ")"
-        ctx.lineWidth = 1.8
+        if (!n) return
+
+        ctx.strokeStyle = stroke
+        ctx.lineWidth = 1.9
         ctx.lineJoin = "round"
         ctx.lineCap = "round"
         ctx.beginPath()
@@ -463,23 +600,115 @@ Panel {
           else ctx.lineTo(x, y)
         }
         ctx.stroke()
+
+        var peaks = spark.peaksFor(pts, cap, w, h)
+        if (!peaks.length) return
+
+        var fam = String(root.contentFontFamily || "sans-serif").replace(/"/g, "")
+        ctx.font = "700 9px \"" + fam + "\""
+        ctx.textBaseline = "alphabetic"
+        ctx.textAlign = "left"
+
+        var pi
+        for (pi = 0; pi < peaks.length; pi++) {
+          var pk = peaks[pi]
+          ctx.beginPath()
+          ctx.fillStyle = stroke
+          ctx.arc(pk.x, pk.y, 2.1, 0, Math.PI * 2)
+          ctx.fill()
+        }
+
+        for (pi = 0; pi < peaks.length; pi++) {
+          pk = peaks[pi]
+          var label = spark.capLabel(pk.v, spark.unit)
+          var tw = ctx.measureText(label).width
+          var lx = pk.x - tw / 2
+          if (lx < 1) lx = 1
+          if (lx + tw > w - 1) lx = Math.max(1, w - 1 - tw)
+          var ly = pk.y - 6
+          if (ly < 10) ly = pk.y + 12
+          if (spark.caption.length > 0 && pk.x > w * 0.62 && pk.y < 18 && ly < 12)
+            ly = pk.y + 12
+
+          var padX = 2.5
+          var padY = 2
+          ctx.fillStyle = "rgba(8, 10, 8, 0.72)"
+          ctx.fillRect(lx - padX, ly - 8 - padY, tw + padX * 2, 10 + padY * 2)
+          ctx.fillStyle = stroke
+          ctx.fillText(label, lx, ly)
+        }
       }
     }
 
     Text {
       visible: spark.caption.length > 0
       anchors.top: parent.top
-      anchors.left: parent.left
-      anchors.topMargin: 3
-      anchors.leftMargin: 5
+      anchors.right: parent.right
+      anchors.topMargin: 4
+      anchors.rightMargin: 6
       text: spark.caption
-      color: Qt.rgba(spark.accent.r, spark.accent.g, spark.accent.b, 0.75)
+      color: Qt.rgba(spark.accent.r, spark.accent.g, spark.accent.b, 0.7)
       font.family: root.contentFontFamily
       font.pixelSize: 9
-      font.letterSpacing: 0.6
+      font.letterSpacing: 0.8
       font.weight: Font.DemiBold
+    }
+  }
+
+  component AxisRail: Item {
+    id: rail
+    property color accent: root.lime
+    property real ratio: 0
+    property string topText: ""
+    property string botText: ""
+    property bool railOnLeft: true
+
+    Rectangle {
+      id: track
+      width: 3
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      anchors.left: rail.railOnLeft ? parent.left : undefined
+      anchors.right: rail.railOnLeft ? undefined : parent.right
+      radius: width / 2
+      color: Qt.rgba(rail.accent.r, rail.accent.g, rail.accent.b, 0.22)
+
+      Rectangle {
+        width: parent.width
+        height: Math.max(parent.width, parent.height * Math.max(0, Math.min(1, rail.ratio)))
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        radius: width / 2
+        color: rail.accent
+      }
+    }
+
+    Text {
+      anchors.top: parent.top
+      anchors.left: rail.railOnLeft ? track.right : parent.left
+      anchors.right: rail.railOnLeft ? parent.right : track.left
+      anchors.leftMargin: rail.railOnLeft ? 3 : 0
+      anchors.rightMargin: rail.railOnLeft ? 0 : 3
+      text: rail.topText
+      color: rail.accent
+      font.family: root.contentFontFamily
+      font.pixelSize: 9
+      font.weight: Font.DemiBold
+      horizontalAlignment: rail.railOnLeft ? Text.AlignLeft : Text.AlignRight
+      wrapMode: Text.NoWrap
+    }
+    Text {
+      anchors.bottom: parent.bottom
+      anchors.left: rail.railOnLeft ? track.right : parent.left
+      anchors.right: rail.railOnLeft ? parent.right : track.left
+      anchors.leftMargin: rail.railOnLeft ? 3 : 0
+      anchors.rightMargin: rail.railOnLeft ? 0 : 3
+      text: rail.botText
+      color: Qt.rgba(rail.accent.r, rail.accent.g, rail.accent.b, 0.7)
+      font.family: root.contentFontFamily
+      font.pixelSize: 9
+      horizontalAlignment: rail.railOnLeft ? Text.AlignLeft : Text.AlignRight
       elide: Text.ElideRight
-      width: Math.max(0, parent.width - 8)
     }
   }
 
@@ -687,6 +916,7 @@ Panel {
     property real scaleMax: 100
     property real tempScaleMax: 110
     property color tempAccent: root.hot
+    property string valueUnit: "%"
     property real chartH: Style.space(56)
 
     readonly property bool showTemp: {
@@ -769,64 +999,15 @@ Panel {
         width: parent.width
         height: hrow.chartH
 
-        Item {
-          id: usageBox
+        SparkPlot {
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
           width: hrow.showTemp ? Math.floor((parent.width - Style.space(8)) / 2) : parent.width
-
-          Rectangle {
-            anchors.fill: parent
-            radius: 3
-            color: Qt.rgba(hrow.accent.r, hrow.accent.g, hrow.accent.b, 0.14)
-          }
-
-          Canvas {
-            id: plot
-            anchors.fill: parent
-            anchors.margins: 2
-
-            function paintLine() { requestPaint() }
-
-            onWidthChanged: paintLine()
-            onHeightChanged: paintLine()
-            onVisibleChanged: if (visible) paintLine()
-
-            Connections {
-              target: hrow
-              function onValuesChanged() { plot.paintLine() }
-              function onScaleMaxChanged() { plot.paintLine() }
-              function onAccentChanged() { plot.paintLine() }
-            }
-
-            onPaint: {
-              var ctx = getContext("2d")
-              var w = width
-              var h = height
-              ctx.clearRect(0, 0, w, h)
-              var pts = hrow.values || []
-              var n = pts.length
-              if (!n || w < 2 || h < 2) return
-              var cap = Math.max(hrow.scaleMax, 1)
-              var c = hrow.accent
-              var stroke = "rgb(" + Math.round(c.r * 255) + ", " + Math.round(c.g * 255) + ", " + Math.round(c.b * 255) + ")"
-              ctx.strokeStyle = stroke
-              ctx.lineWidth = 1.8
-              ctx.lineJoin = "round"
-              ctx.lineCap = "round"
-              ctx.beginPath()
-              for (var i = 0; i < n; i++) {
-                var v = Number(pts[i])
-                if (!isFinite(v)) v = 0
-                var x = n === 1 ? w * 0.5 : i * (w - 1) / (n - 1)
-                var y = h - 1 - (h - 2) * Math.max(0, Math.min(1, v / cap))
-                if (i === 0) ctx.moveTo(x, y)
-                else ctx.lineTo(x, y)
-              }
-              ctx.stroke()
-            }
-          }
+          values: hrow.values
+          scaleMax: hrow.scaleMax
+          accent: hrow.accent
+          unit: hrow.valueUnit
         }
 
         SparkPlot {
@@ -838,6 +1019,7 @@ Panel {
           values: hrow.temps
           scaleMax: hrow.tempScaleMax
           accent: hrow.tempAccent
+          unit: "°"
           caption: "TEMP"
         }
       }
@@ -1006,6 +1188,7 @@ Panel {
               scaleMax: Math.max(Model.num(root.power.cap_w, 0), 1)
               accent: root.heatColor(root.powerPct, root.powerCool)
               extraColor: root.powerCool
+              valueUnit: "W"
               chartH: Style.space(56)
             }
           }
